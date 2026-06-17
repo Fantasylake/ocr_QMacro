@@ -24,7 +24,7 @@
 |------|------|------|
 | GUI 框架 | PySide6 | 现代化 Qt 界面，原生信号/槽 |
 | 屏幕截图 | mss | 高性能截图库，比 pyautogui.screenshot 快 |
-| OCR 引擎 | easyocr | 仅加载 `['ch_sim', 'en']` 模型，平衡精度与体积 |
+| OCR 引擎 | RapidOCR (ONNX) | PaddleOCR 的 ONNX 导出版，~13MB 模型 + 15MB onnxruntime，无需联网，中文识别准确 |
 | 鼠标点击 | pyautogui | 简单可靠的鼠标点击 |
 | 全局监听 | pynput | 用于「屏幕坐标拾取」功能 |
 | 配置存储 | JSON 文件 | 人类可读、易调试 |
@@ -52,7 +52,7 @@
 │  业务层 (core/)                          │
 │  - config.py     JSON 配置加载/保存      │
 │  - capture.py    mss 截图                │
-│  - ocr.py        EasyOCR 单例 reader     │
+│  - ocr.py        RapidOCR 单例引擎 (ONNX)   │
 │  - matcher.py    关键词匹配              │
 │  - clicker.py    pyautogui 点击          │
 │  - storage.py    存图 / 写 CSV           │
@@ -149,7 +149,7 @@ jixiechaoren/
    - 遍历所有监控区域：
      a. mss 截图 → PNG bytes
      b. 存盘到 `src/pic/YYYYMMDD/HHMMSS_<region>_<i>.png`
-     c. EasyOCR 识别 → 文本
+     c. RapidOCR 识别 → 文本
      d. matcher 判定是否包含任一关键词
      e. 如果命中：追加一行到 CSV，记录 `(timestamp, region, text, keyword)`
 3. **本轮所有命中区域处理完成后**，按 `order` 升序依次点击所有点击点
@@ -160,20 +160,24 @@ jixiechaoren/
 
 ### 8.1 OCR 必须异步
 
-EasyOCR 推理耗时 0.5~3 秒（取决于图片大小），必须放 `QThread`，否则 GUI 会冻结。Worker 通过 `pyqtSignal` 把结果发回主线程。
+RapidOCR 推理耗时 0.5~3 秒（取决于图片大小），必须放 `QThread`，否则 GUI 会冻结。Worker 通过 `pyqtSignal` 把结果发回主线程。
 
-### 8.2 Reader 单例
+### 8.2 引擎单例
 
-`easyocr.Reader` 首次构造耗时 10~30 秒（加载模型），所以用模块级单例懒加载：
+`RapidOCR` 首次构造耗时 ~1 秒（onnxruntime warm-up），所以用模块级单例懒加载：
 
 ```python
-_reader: easyocr.Reader | None = None
+from typing import Optional
 
-def get_reader() -> easyocr.Reader:
-    global _reader
-    if _reader is None:
-        _reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-    return _reader
+_engine: Optional["RapidOCR"] = None
+
+
+def get_engine() -> "RapidOCR":
+    global _engine
+    if _engine is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _engine = RapidOCR()
+    return _engine
 ```
 
 ### 8.3 坐标拾取实现
@@ -232,7 +236,7 @@ UI 控件 `textChanged` → 500ms 防抖 → 写 JSON。避免每次按键都 IO
 
 ```
 PySide6>=6.6.0
-easyocr>=1.7.0
+rapidocr-onnxruntime>=1.4.0
 mss>=9.0.0
 pyautogui>=0.9.54
 pynput>=1.7.6

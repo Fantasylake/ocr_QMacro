@@ -39,7 +39,7 @@ def test_normalize_collapses_whitespace():
 
 
 def test_texts_equal_tolerates_ocr_noise():
-    # Whitespace differences (the main OCR artifact with EasyOCR line breaks)
+    # Whitespace differences (the main OCR artifact with line-break shifts)
     assert texts_equal("操作 成功", "操作\n成功")
     assert texts_equal("  操作  成功  ", "操作 成功")
     # Real content change

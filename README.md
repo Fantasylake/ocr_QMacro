@@ -6,7 +6,7 @@
 pip install -r requirements.txt
 ```
 
-首次运行 easyocr 会自动下载中文/英文模型（约 100MB），请保持联网。
+首次运行无需联网，RapidOCR 模型在 pip wheel 内联（~13MB onnx 模型），安装即用。
 
 ## 运行
 

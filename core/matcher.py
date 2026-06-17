@@ -12,8 +12,8 @@ def normalize_text(text: str) -> str:
 
     Collapses all whitespace (spaces, tabs, newlines) to a single space
     and strips both ends. This makes "a b" / "a\\nb" / " a   b " all
-    compare equal — necessary because EasyOCR's line breaks shift around
-    even when the visible content is unchanged.
+    compare equal — necessary because OCR engines can shift line
+    breaks even when the visible content is unchanged.
     """
     if not text:
         return ""
