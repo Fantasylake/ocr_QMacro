@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from core.config import ScanConfig, load_config, save_config
 from core.scheduler import Scheduler
 from core.storage import clean_old_logs
+from ui.config_dialog import ConfigDialog
 from ui.picker import pick_coordinate, pick_region
 from ui.point_panel import PointPanel
 from ui.region_panel import RegionPanel
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.scheduler = Scheduler(self._config, parent=self)
         self.scheduler.log.connect(self._append_log)
         self.scheduler.status_changed.connect(self._on_status_changed)
+        self.scheduler.baseline_updated.connect(self._on_baseline_updated)
 
         self._build_ui()
         self._load_into_ui()
@@ -74,6 +76,19 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._on_stop)
         bar.addWidget(self.stop_btn)
+
+        bar.addSpacing(6)
+
+        self.config_btn = QPushButton("配置")
+        self.config_btn.setMinimumWidth(60)
+        self.config_btn.clicked.connect(self._on_open_config)
+        bar.addWidget(self.config_btn)
+
+        # Baseline status pill (read-only): shows whether baseline mode is
+        # on and if a baseline has been saved. Updated by scheduler signals.
+        self.baseline_status_label = QLabel("基准: 关")
+        self.baseline_status_label.setStyleSheet("color: #888; padding: 0 6px;")
+        bar.addWidget(self.baseline_status_label)
 
         bar.addSpacing(12)
 
@@ -205,6 +220,7 @@ class MainWindow(QMainWindow):
 
         save_config(self._config, CONFIG_PATH)
         self.scheduler.update_config(self._config)
+        self._update_baseline_status_label()
 
     def _load_into_ui(self) -> None:
         self.scan_interval_spin.setValue(self._config.scan_interval)
@@ -229,6 +245,7 @@ class MainWindow(QMainWindow):
             "width": r.width,
             "height": r.height,
         })
+        self._update_baseline_status_label()
 
     # ------------------------------------------------------------------ Validation
     def _validate(self) -> bool:
@@ -268,6 +285,43 @@ class MainWindow(QMainWindow):
         self.wait_interval_spin.setEnabled(not running)
         self.kw_edit.setEnabled(not running)
         self.region_panel.setEnabled(not running)
+        # The config button stays open in both states — settings can be
+        # reviewed while the scheduler is running.
+
+    def _on_open_config(self) -> None:
+        dlg = ConfigDialog(self._config, parent=self)
+        if dlg.exec() == ConfigDialog.Accepted:
+            # The dialog mutates self._config in-place on accept. Tell the
+            # scheduler to re-apply (this also clears baseline if the
+            # region hash changed, and resets the in-memory baseline).
+            self.scheduler.update_config(self._config)
+            # Trigger the same 600ms debounced save the other UI controls
+            # use, so the new settings land in config.json.
+            self._mark_dirty()
+            self._update_baseline_status_label()
+
+    def _on_baseline_updated(self, _use: bool, text: str, rhash: str, ts: str) -> None:
+        """Worker thread just (re)built the baseline. Persist it."""
+        self._config.baseline_text = text
+        self._config.baseline_region_hash = rhash
+        self._config.baseline_timestamp = ts
+        self._update_baseline_status_label()
+        # Save immediately — baseline persistence is important and we don't
+        # want a 600ms debounce window where a crash loses the baseline.
+        save_config(self._config, CONFIG_PATH)
+
+    def _update_baseline_status_label(self) -> None:
+        if not self._config.use_baseline:
+            self.baseline_status_label.setText("基准: 关")
+            self.baseline_status_label.setStyleSheet("color: #888; padding: 0 6px;")
+            return
+        if self._config.baseline_text:
+            short = self._config.baseline_text[:12].replace("\n", " ")
+            self.baseline_status_label.setText(f"基准: 已建 ({len(self._config.baseline_text)}字)")
+            self.baseline_status_label.setStyleSheet("color: #2a7; padding: 0 6px;")
+        else:
+            self.baseline_status_label.setText("基准: 开 (未建)")
+            self.baseline_status_label.setStyleSheet("color: #c80; padding: 0 6px;")
 
     # ------------------------------------------------------------------ Pickers
     def _on_pick_point(self, label: str) -> None:

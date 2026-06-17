@@ -40,7 +40,6 @@ def test_stop_during_busy_round_does_not_crash(app, tmp_path, monkeypatch):
     """stop() while a round is mid-flight must not crash the process."""
     import core.storage as storage_mod
     monkeypatch.setattr(storage_mod, "LOG_DIR", tmp_path / "log")
-    monkeypatch.setattr(storage_mod, "CSV_DIR", tmp_path / "csv")
     monkeypatch.setattr(storage_mod, "OUTPUT_DIR", tmp_path / "out")
     monkeypatch.setattr(storage_mod, "PIC_DIR", tmp_path / "pic")
     monkeypatch.setattr(storage_mod, "PIC_FOLDER_MAX_FILES", 0)
@@ -63,7 +62,6 @@ def test_stop_during_busy_round_does_not_crash(app, tmp_path, monkeypatch):
     monkeypatch.setattr(sched_mod, "recognize_text", slow_ocr)
     monkeypatch.setattr(sched_mod, "save_screenshot",
                         lambda *a, **k: tmp_path / "fake.png")
-    monkeypatch.setattr(sched_mod, "append_csv_row", lambda *a, **k: tmp_path / "fake.csv")
     monkeypatch.setattr(sched_mod, "append_jsonl_record", lambda *a, **k: tmp_path / "fake.json")
     monkeypatch.setattr(sched_mod, "append_log_txt", lambda *a, **k: tmp_path / "log.txt")
 
@@ -100,7 +98,6 @@ def test_stop_at_various_points_does_not_crash(app, tmp_path, monkeypatch, delay
     """stop() called at any point in a round must not crash."""
     import core.storage as storage_mod
     monkeypatch.setattr(storage_mod, "LOG_DIR", tmp_path / "log")
-    monkeypatch.setattr(storage_mod, "CSV_DIR", tmp_path / "csv")
     monkeypatch.setattr(storage_mod, "OUTPUT_DIR", tmp_path / "out")
     monkeypatch.setattr(storage_mod, "PIC_DIR", tmp_path / "pic")
     monkeypatch.setattr(storage_mod, "PIC_FOLDER_MAX_FILES", 0)
@@ -123,7 +120,6 @@ def test_stop_at_various_points_does_not_crash(app, tmp_path, monkeypatch, delay
     monkeypatch.setattr(sched_mod, "recognize_text", slow_ocr)
     monkeypatch.setattr(sched_mod, "save_screenshot",
                         lambda *a, **k: tmp_path / "fake.png")
-    monkeypatch.setattr(sched_mod, "append_csv_row", lambda *a, **k: tmp_path / "fake.csv")
     monkeypatch.setattr(sched_mod, "append_jsonl_record", lambda *a, **k: tmp_path / "fake.json")
     monkeypatch.setattr(sched_mod, "append_log_txt", lambda *a, **k: tmp_path / "log.txt")
 

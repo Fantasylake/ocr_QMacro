@@ -17,6 +17,10 @@ DEFAULT_CONFIG = {
     "home_point": {"name": "首页点", "x": 0, "y": 0},
     "monitor_region": {"name": "a1", "top": 0, "left": 0, "width": 0, "height": 0},
     "output_json": False,
+    "use_baseline": False,
+    "baseline_text": "",
+    "baseline_region_hash": "",
+    "baseline_timestamp": "",
 }
 
 
@@ -76,6 +80,10 @@ class ScanConfig:
     home_point: ClickPoint = field(default_factory=lambda: ClickPoint("首页点", 0, 0))
     monitor_region: MonitorRegion = field(default_factory=lambda: MonitorRegion("a1", 0, 0, 0, 0))
     output_json: bool = False
+    use_baseline: bool = False
+    baseline_text: str = ""
+    baseline_region_hash: str = ""
+    baseline_timestamp: str = ""
 
     @classmethod
     def default(cls) -> "ScanConfig":
@@ -89,6 +97,10 @@ class ScanConfig:
             home_point=ClickPoint.from_dict(DEFAULT_CONFIG["home_point"]),
             monitor_region=MonitorRegion.from_dict(DEFAULT_CONFIG["monitor_region"]),
             output_json=bool(DEFAULT_CONFIG["output_json"]),
+            use_baseline=bool(DEFAULT_CONFIG["use_baseline"]),
+            baseline_text=str(DEFAULT_CONFIG["baseline_text"]),
+            baseline_region_hash=str(DEFAULT_CONFIG["baseline_region_hash"]),
+            baseline_timestamp=str(DEFAULT_CONFIG["baseline_timestamp"]),
         )
 
 
@@ -117,6 +129,10 @@ def load_config(path: Path) -> ScanConfig:
         home_point=ClickPoint.from_dict(raw.get("home_point", DEFAULT_CONFIG["home_point"])),
         monitor_region=MonitorRegion.from_dict(raw.get("monitor_region", DEFAULT_CONFIG["monitor_region"])),
         output_json=bool(raw.get("output_json", DEFAULT_CONFIG["output_json"])),
+        use_baseline=bool(raw.get("use_baseline", DEFAULT_CONFIG["use_baseline"])),
+        baseline_text=str(raw.get("baseline_text", DEFAULT_CONFIG["baseline_text"])),
+        baseline_region_hash=str(raw.get("baseline_region_hash", DEFAULT_CONFIG["baseline_region_hash"])),
+        baseline_timestamp=str(raw.get("baseline_timestamp", DEFAULT_CONFIG["baseline_timestamp"])),
     )
 
 
@@ -132,7 +148,18 @@ def save_config(cfg: ScanConfig, path: Path) -> None:
         "home_point": cfg.home_point.to_dict(),
         "monitor_region": cfg.monitor_region.to_dict(),
         "output_json": cfg.output_json,
+        "use_baseline": cfg.use_baseline,
+        "baseline_text": cfg.baseline_text,
+        "baseline_region_hash": cfg.baseline_region_hash,
+        "baseline_timestamp": cfg.baseline_timestamp,
     }
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+
+def region_hash(region: MonitorRegion) -> str:
+    """Stable hash of a monitor region for detecting coordinate changes."""
+    import hashlib
+    raw = f"{region.top},{region.left},{region.width},{region.height}"
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()

@@ -1,8 +1,6 @@
-"""File I/O: screenshots, CSV logs, JSONL records, plain-text logs."""
+"""File I/O: screenshots, JSONL records, plain-text logs."""
 from __future__ import annotations
 
-import csv
-import io
 import json
 import re
 import shutil
@@ -19,7 +17,6 @@ LOG_RETENTION_DAYS = 7
 LOG_DIR = Path("src/log")
 OUTPUT_DIR = Path("src/output")
 PIC_DIR = Path("src/pic")
-CSV_DIR = Path("src/csv")
 
 # When a YYYYMMDD picture folder has more than this many PNGs, oldest
 # files are removed so the folder stays bounded. Set to 0 to disable.
@@ -146,26 +143,16 @@ def save_screenshot(
     return path
 
 
-def append_csv_row(
-    ts: Union[datetime, None] = None,
-    region: str = "",
-    text: str = "",
-    matched_keyword: str = "",
-    root: Union[str, Path] = CSV_DIR,
-) -> Path:
-    """Append a row to the daily CSV log."""
-    if ts is None:
-        ts = datetime.now()
-    root = Path(root)
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{ts.strftime('%Y%m%d')}.csv"
-    new_file = not path.exists()
-    with path.open("a", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f)
-        if new_file:
-            writer.writerow(["timestamp", "region", "text", "matched_keyword"])
-        writer.writerow([ts.strftime("%Y-%m-%d %H:%M:%S"), region, text, matched_keyword])
-    return path
+def append_csv_row(*args, **kwargs):  # pragma: no cover
+    """Removed: CSV export is no longer produced by the app.
+
+    The function body is gone. Any caller still invoking it will get a
+    ``NotImplementedError`` so the regression is loud rather than silent.
+    Existing on-disk CSV files under ``src/csv/`` are no longer touched.
+    """
+    raise NotImplementedError(
+        "append_csv_row has been removed: CSV export is no longer produced."
+    )
 
 
 def append_jsonl_record(

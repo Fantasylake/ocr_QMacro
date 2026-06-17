@@ -5,16 +5,17 @@ import threading
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from typing import List, Optional
 
 from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal
 
 from core.capture import capture_region, CaptureError
 from core.clicker import click_point
-from core.config import ScanConfig
-from core.matcher import match_keywords, texts_equal
+from core.config import ScanConfig, region_hash
+from core.matcher import match_keywords, normalize_text, texts_equal
 from core.ocr import recognize_text
-from core.storage import append_csv_row, append_jsonl_record, append_log_txt, save_screenshot
+from core.storage import append_jsonl_record, append_log_txt, save_screenshot
 
 
 @dataclass
@@ -31,13 +32,24 @@ class ScanResult:
 class ScanWorker(QObject):
     finished_round = Signal(list)
     log = Signal(str)
+    # Emitted when the worker updates baseline state. Carries the new
+    # (use_baseline, baseline_text, baseline_region_hash, baseline_timestamp)
+    # values; the GUI thread is expected to persist them to config.json.
+    baseline_updated = Signal(bool, str, str, str)
 
     def __init__(self, config: ScanConfig, stop_event: threading.Event):
         super().__init__()
         self._config = config
         self._stop_event = stop_event
         self._busy = False
+        # ``_last_text`` is the per-process running value (mirrors the
+        # previous behaviour for the non-baseline path). When
+        # ``use_baseline`` is on, comparison is against ``_baseline_text``
+        # instead, which mirrors ``config.baseline_text`` at start time.
         self._last_text = ""
+        self._baseline_text = ""
+        self._baseline_established = False
+        self._baseline_failed = False  # sticky: don't retry every round
 
     def run_once(self) -> None:
         if self._busy:
@@ -60,6 +72,12 @@ class ScanWorker(QObject):
         ts = datetime.now()
         cfg = self._config
 
+        # Step 0 (one-shot): establish baseline at the start of a run.
+        # We do this *before* clicking p1 so the baseline reflects the
+        # actual current page state, not a state we just triggered.
+        if cfg.use_baseline and not self._baseline_established and not self._baseline_failed:
+            return self._establish_baseline(ts)
+
         # Step 1: click refresh point p1
         self.log.emit(f"点击刷新点，等待{cfg.wait_interval}s...")
         append_log_txt(f"点击刷新点，等待{cfg.wait_interval}s...")
@@ -75,11 +93,22 @@ class ScanWorker(QObject):
         region = cfg.monitor_region
         try:
             png = capture_region(region.bbox)
-            img_path = str(save_screenshot(png, region.name, 1, ts))
         except CaptureError as e:
             self.log.emit(f"[截图失败] {region.name}: {e}")
             append_log_txt(f"截图失败: {region.name}: {e}")
             return [ScanResult(ts, region.name, "", "", "", False, str(e))]
+
+        # Persist the screenshot only if intermediate-file output is on.
+        # Otherwise the PNG bytes stay in memory and are discarded after
+        # this round — disk never sees them.
+        img_path = ""
+        if cfg.output_json:
+            try:
+                img_path = str(save_screenshot(png, region.name, 1, ts))
+            except OSError as e:
+                self.log.emit(f"[保存截图失败] {e}")
+                append_log_txt(f"保存截图失败: {e}")
+                img_path = ""
 
         text = ""
         try:
@@ -87,19 +116,41 @@ class ScanWorker(QObject):
         except Exception as e:
             self.log.emit(f"[OCR错误] {e}")
             append_log_txt(f"OCR错误: {e}")
-            return [ScanResult(ts, region.name, "", "", "", False, str(e))]
+            return [ScanResult(ts, region.name, "", "", img_path, False, str(e))]
 
         matched, kw = match_keywords(text, cfg.keywords)
 
         self.log.emit(f"OCR: {text[:80] or '(空)'}")
         append_log_txt(f"OCR: {text[:80] or '(空)'}")
 
+        # Step 2.5: region changed since baseline was set → auto-reset.
+        if cfg.use_baseline and cfg.baseline_region_hash and region_hash(region) != cfg.baseline_region_hash:
+            self.log.emit("监控区域已变更，重建基准")
+            append_log_txt("监控区域已变更，重建基准")
+            self._baseline_text = text
+            self._baseline_established = True
+            self._baseline_failed = False
+            ts_iso = ts.isoformat(timespec="seconds")
+            cfg.baseline_text = text
+            cfg.baseline_region_hash = region_hash(region)
+            cfg.baseline_timestamp = ts_iso
+            self.baseline_updated.emit(True, text, cfg.baseline_region_hash, ts_iso)
+            return [ScanResult(ts, region.name, text, "", img_path, False, "baseline-rebuilt")]
+
+        # Pick the reference text: baseline if enabled, else last round.
+        if cfg.use_baseline:
+            ref = self._baseline_text
+            ref_label = "基准"
+        else:
+            ref = self._last_text
+            ref_label = "上一轮"
+
         # Always skip if text is unchanged (whitespace-insensitive; whether
         # or not it matched a keyword). OCR can shift line breaks or spaces
         # on the same image, so we compare on a normalized form.
-        if texts_equal(text, self._last_text):
-            self.log.emit("文本未变化，跳过点击，等待下一轮")
-            append_log_txt("文本未变化，跳过点击，等待下一轮")
+        if texts_equal(text, ref):
+            self.log.emit(f"文本未变化（对比{ref_label}），跳过点击，等待下一轮")
+            append_log_txt(f"文本未变化（对比{ref_label}），跳过点击，等待下一轮")
             return [ScanResult(ts, region.name, text, kw, img_path, False)]
 
         # New text
@@ -114,11 +165,18 @@ class ScanWorker(QObject):
         self.log.emit(f"命中「{kw}」: 文本已更新")
         append_log_txt(f"命中「{kw}」: 文本已更新")
 
-        append_csv_row(ts, region.name, text, kw)
         if cfg.output_json:
-            append_jsonl_record(ts, region.name, text, kw, img_path)
-            self.log.emit(f"写入记录: {img_path}")
-            append_log_txt(f"写入记录: {img_path}")
+            if img_path:
+                append_jsonl_record(ts, region.name, text, kw, img_path)
+                self.log.emit(f"写入记录: {img_path}")
+                append_log_txt(f"写入记录: {img_path}")
+            else:
+                # Screenshot save failed earlier; still log the hit.
+                self.log.emit("命中但无图片路径，跳过 JSON 写入")
+                append_log_txt("命中但无图片路径，跳过 JSON 写入")
+        else:
+            self.log.emit("命中（未开启中间文件输出）")
+            append_log_txt("命中（未开启中间文件输出）")
 
         # Click first-line point p2
         self.log.emit(f"点击首行点，等待{cfg.wait_interval}s...")
@@ -173,7 +231,10 @@ class ScanWorker(QObject):
         # with the worker, and its slot only runs on the worker thread.
         stopper = QTimer(self)
         stopper.setInterval(100)
-        stopper.timeout.connect(self._check_stop_in_wait, loop=loop)
+        # PySide6 Signal.connect() does not accept ``loop=`` (that was a
+        # PyQt4-era keyword). Bind the loop argument via functools.partial
+        # instead so the slot receives it positionally.
+        stopper.timeout.connect(partial(self._check_stop_in_wait, loop))
         stopper.start()
         try:
             loop.exec()
@@ -185,14 +246,77 @@ class ScanWorker(QObject):
         if self._stop_event.is_set():
             loop.quit()
 
+    def _establish_baseline(self, ts: datetime) -> List[ScanResult]:
+        """One-shot: capture + OCR the current page and store as baseline.
+
+        Called from ``_do_round`` *before* any click, so the baseline
+        reflects the actual user-visible state at the moment monitoring
+        starts. On failure we set ``_baseline_failed`` (sticky) and
+        downgrade ``use_baseline`` to False for the rest of the run.
+
+        Baseline establishment does not save an intermediate screenshot:
+        the PNG is only kept in memory for the OCR call. Whether the
+        user wants the on-disk trail is governed by ``output_json`` like
+        every other round, but for the baseline round itself there is
+        no ``img_path`` to log — we only persist the OCR text.
+        """
+        cfg = self._config
+        region = cfg.monitor_region
+        self.log.emit(f"[基准确立] 开始扫描区域 {region.name}...")
+        append_log_txt(f"[基准确立] 开始扫描区域 {region.name}...")
+
+        try:
+            png = capture_region(region.bbox)
+        except CaptureError as e:
+            self.log.emit(f"[基准确立失败-截图] {e}，自动关闭基准模式")
+            append_log_txt(f"基准确立失败-截图: {e}，自动关闭基准模式")
+            self._baseline_failed = True
+            cfg.use_baseline = False
+            return [ScanResult(ts, region.name, "", "", "", False, f"baseline-capture-failed: {e}")]
+
+        try:
+            text = recognize_text(png)
+        except Exception as e:
+            self.log.emit(f"[基准确立失败-OCR] {e}，自动关闭基准模式")
+            append_log_txt(f"基准确立失败-OCR: {e}，自动关闭基准模式")
+            self._baseline_failed = True
+            cfg.use_baseline = False
+            return [ScanResult(ts, region.name, "", "", "", False, f"baseline-ocr-failed: {e}")]
+
+        normalized = normalize_text(text)
+        ts_iso = ts.isoformat(timespec="seconds")
+        rhash = region_hash(region)
+        self._baseline_text = normalized
+        self._baseline_established = True
+        cfg.baseline_text = normalized
+        cfg.baseline_region_hash = rhash
+        cfg.baseline_timestamp = ts_iso
+
+        snippet = (normalized[:80] + "...") if len(normalized) > 80 else normalized
+        self.log.emit(f"[基准确立完成] 长度={len(normalized)} 预览: {snippet or '(空)'}")
+        append_log_txt(f"基准确立完成: 长度={len(normalized)} 预览: {snippet or '(空)'}")
+        self.baseline_updated.emit(True, normalized, rhash, ts_iso)
+
+        # First round: text equals itself, treat as "no change yet".
+        return [ScanResult(ts, region.name, text, "", "", False, "baseline-initialized")]
+
+    def reset_baseline(self) -> None:
+        """Forget the in-memory baseline so the next round rebuilds it."""
+        self._baseline_text = ""
+        self._baseline_established = False
+        self._baseline_failed = False
+
 
 class Scheduler(QObject):
     log = Signal(str)
     status_changed = Signal(bool)
+    # Forwarded from ScanWorker.baseline_updated. GUI listens and persists.
+    baseline_updated = Signal(bool, str, str, str)
 
     def __init__(self, config: ScanConfig, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._config = config
+        self._last_region_hash: str = region_hash(config.monitor_region)
         self._timer: Optional[QTimer] = None
         self._thread: Optional[QThread] = None
         self._worker: Optional[ScanWorker] = None
@@ -203,9 +327,32 @@ class Scheduler(QObject):
         return self._timer is not None and self._timer.isActive()
 
     def update_config(self, config: ScanConfig) -> None:
+        """Apply a new config to the running scheduler.
+
+        - Update timer interval.
+        - Detect monitor region changes: clear baseline (both in-memory
+          and in the config we hold) so the next round rebuilds it.
+        """
         self._config = config
         if self._timer is not None:
             self._timer.setInterval(max(1, config.scan_interval) * 1000)
+
+        new_hash = region_hash(config.monitor_region)
+        if new_hash != self._last_region_hash:
+            self._last_region_hash = new_hash
+            config.baseline_text = ""
+            config.baseline_region_hash = ""
+            config.baseline_timestamp = ""
+            if self._worker is not None:
+                self._worker.reset_baseline()
+
+    def clear_baseline(self) -> None:
+        """Forget any saved baseline. Safe to call while running."""
+        self._config.baseline_text = ""
+        self._config.baseline_region_hash = ""
+        self._config.baseline_timestamp = ""
+        if self._worker is not None:
+            self._worker.reset_baseline()
 
     def start(self) -> None:
         if self.is_running:
@@ -216,12 +363,19 @@ class Scheduler(QObject):
         self._worker.moveToThread(self._thread)
         self._worker.log.connect(self._on_log)
         self._worker.finished_round.connect(lambda _: None)
+        self._worker.baseline_updated.connect(self.baseline_updated)
+        # Track region hash so update_config() can detect changes later.
+        self._last_region_hash = region_hash(self._config.monitor_region)
         self._thread.start()
         self._timer = QTimer(self)
         self._timer.setInterval(max(1, self._config.scan_interval) * 1000)
         self._timer.timeout.connect(self._worker.run_once)
         self._timer.start()
-        msg = f"[启动] 扫描间隔 {self._config.scan_interval}s，等待时间 {self._config.wait_interval}s"
+        if self._config.use_baseline:
+            mode_msg = "基准模式"
+        else:
+            mode_msg = "普通模式"
+        msg = f"[启动] 扫描间隔 {self._config.scan_interval}s，等待时间 {self._config.wait_interval}s，{mode_msg}"
         self.log.emit(msg)
         append_log_txt(msg)
         self.status_changed.emit(True)

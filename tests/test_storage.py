@@ -1,4 +1,3 @@
-import csv
 import json
 import time
 from datetime import datetime
@@ -24,25 +23,11 @@ def test_save_screenshot_creates_file(tmp_path: Path):
     assert "_状态栏_1.png" in str(path)
 
 
-def test_append_csv_row_creates_with_header(tmp_path: Path):
-    ts = datetime(2026, 6, 17, 13, 25, 10)
-    path = append_csv_row(ts, "状态栏", "操作成功", "成功", root=tmp_path)
-    assert path.exists()
-    with path.open("r", encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f))
-    assert rows[0] == ["timestamp", "region", "text", "matched_keyword"]
-    assert rows[1] == ["2026-06-17 13:25:10", "状态栏", "操作成功", "成功"]
-
-
-def test_append_csv_row_appends(tmp_path: Path):
-    ts1 = datetime(2026, 6, 17, 13, 25, 10)
-    ts2 = datetime(2026, 6, 17, 13, 25, 15)
-    append_csv_row(ts1, "状态栏", "操作成功", "成功", root=tmp_path)
-    append_csv_row(ts2, "状态栏", "任务完成", "完成", root=tmp_path)
-    with (tmp_path / "20260617.csv").open("r", encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.reader(f))
-    assert len(rows) == 3
-    assert rows[2][3] == "完成"
+def test_append_csv_row_is_removed():
+    """CSV export is no longer produced; the function must raise loudly
+    so any leftover caller is caught immediately."""
+    with pytest.raises(NotImplementedError):
+        append_csv_row(datetime.now(), "区域", "文本", "关键词")
 
 
 def test_append_jsonl_record_creates_file(tmp_path: Path):
