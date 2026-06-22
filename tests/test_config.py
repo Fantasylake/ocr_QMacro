@@ -16,7 +16,14 @@ def test_default_config_has_expected_fields():
     cfg = ScanConfig.default()
     assert cfg.scan_interval == 5
     assert cfg.wait_interval == 3
-    assert cfg.keywords == []
+    # Default include keywords (ventilation skylight / smoke vent domain).
+    assert cfg.keywords == [
+        "通风天窗", "通风气楼", "薄型天窗", "电动消防联动排烟天窗",
+        "流线型通风器", "三角型排烟天窗", "通风天窗厂家",
+        "通风气楼厂家", "电动排烟天窗厂家",
+    ]
+    # Default exclude keywords (skip 'own factory' inquiries).
+    assert cfg.exclude_keywords == ["自己的厂房"]
     assert cfg.monitor_region.name == "a1"
     assert cfg.output_json is False  # disabled by default
     # Baseline defaults

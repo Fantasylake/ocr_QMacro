@@ -125,6 +125,21 @@ class MainWindow(QMainWindow):
         kw_box.addWidget(self.kw_edit, 1)
         root.addLayout(kw_box)
 
+        # --- Exclude keyword bar ---
+        # Acts as a "must NOT contain" gate: when any of these substrings
+        # appears in the OCR text (after passing the include-keyword gate
+        # and the change gate), the click chain is skipped for that round.
+        # Empty value disables the gate (default).
+        ex_box = QHBoxLayout()
+        ex_lbl = QLabel("排除关键词(多值用|分隔):")
+        ex_lbl.setStyleSheet("font-weight: bold;")
+        ex_box.addWidget(ex_lbl)
+        self.ex_kw_edit = QLineEdit()
+        self.ex_kw_edit.setPlaceholderText("失败|异常|已取消（留空表示不启用）")
+        self.ex_kw_edit.textChanged.connect(self._mark_dirty)
+        ex_box.addWidget(self.ex_kw_edit, 1)
+        root.addLayout(ex_box)
+
         # --- Main area: points left, region right ---
         main = QHBoxLayout()
         main.setSpacing(10)
@@ -137,7 +152,7 @@ class MainWindow(QMainWindow):
         self._pt_x: list[QSpinBox] = []
         self._pt_y: list[QSpinBox] = []
         self._pt_pick: list[QPushButton] = []
-        pt_labels = ["刷新点(p1)", "首行点(p2)", "页内点(p3)", "首页点(p4)"]
+        pt_labels = ["刷新页面点(p1)", "首行业务点(p2)", "立即接单点(p3)", "确认接单点(p4)", "返回首页点(p5)"]
 
         for i, lbl in enumerate(pt_labels):
             row_lbl = QLabel(lbl)
@@ -194,22 +209,27 @@ class MainWindow(QMainWindow):
     def _save_config(self) -> None:
         kw_text = self.kw_edit.text().strip()
         keywords = [k.strip() for k in kw_text.split("|") if k.strip()]
+        ex_text = self.ex_kw_edit.text().strip()
+        exclude_keywords = [k.strip() for k in ex_text.split("|") if k.strip()]
 
         pt_x = [s.value() for s in self._pt_x]
         pt_y = [s.value() for s in self._pt_y]
-        pt_names = ["刷新点", "首行点", "页内点", "首页点"]
+        pt_names = ["刷新页面点", "首行业务点", "立即接单点", "确认接单点", "返回首页点"]
 
         self._config.scan_interval = self.scan_interval_spin.value()
         self._config.wait_interval = self.wait_interval_spin.value()
         self._config.keywords = keywords
+        self._config.exclude_keywords = exclude_keywords
         self._config.refresh_point.x = pt_x[0]
         self._config.refresh_point.y = pt_y[0]
         self._config.first_line_point.x = pt_x[1]
         self._config.first_line_point.y = pt_y[1]
         self._config.page_click_point.x = pt_x[2]
         self._config.page_click_point.y = pt_y[2]
-        self._config.home_point.x = pt_x[3]
-        self._config.home_point.y = pt_y[3]
+        self._config.page_click_point_2.x = pt_x[3]
+        self._config.page_click_point_2.y = pt_y[3]
+        self._config.home_point.x = pt_x[4]
+        self._config.home_point.y = pt_y[4]
 
         reg = self.region_panel.collect()
         self._config.monitor_region.name = reg["name"]
@@ -226,11 +246,13 @@ class MainWindow(QMainWindow):
         self.scan_interval_spin.setValue(self._config.scan_interval)
         self.wait_interval_spin.setValue(self._config.wait_interval)
         self.kw_edit.setText("|".join(self._config.keywords))
+        self.ex_kw_edit.setText("|".join(self._config.exclude_keywords))
 
         pts = [
             self._config.refresh_point,
             self._config.first_line_point,
             self._config.page_click_point,
+            self._config.page_click_point_2,
             self._config.home_point,
         ]
         for i, p in enumerate(pts):
@@ -255,7 +277,7 @@ class MainWindow(QMainWindow):
             return False
         for i, x in enumerate(self._pt_x):
             if x.value() == 0 and self._pt_y[i].value() == 0:
-                name = ["刷新点", "首行点", "页内点", "首页点"][i]
+                name = ["刷新页面点", "首行业务点", "立即接单点", "确认接单点", "返回首页点"][i]
                 QMessageBox.warning(self, "坐标未设置", f"{name} 坐标为 (0,0)，请先拾取有效坐标")
                 return False
         reg = self.region_panel.collect()
@@ -284,6 +306,7 @@ class MainWindow(QMainWindow):
         self.scan_interval_spin.setEnabled(not running)
         self.wait_interval_spin.setEnabled(not running)
         self.kw_edit.setEnabled(not running)
+        self.ex_kw_edit.setEnabled(not running)
         self.region_panel.setEnabled(not running)
         # The config button stays open in both states — settings can be
         # reviewed while the scheduler is running.
@@ -335,10 +358,11 @@ class MainWindow(QMainWindow):
         if result is not None:
             x, y = result
             idx_map = {
-                "刷新点(p1)": 0,
-                "首行点(p2)": 1,
-                "页内点(p3)": 2,
-                "首页点(p4)": 3,
+                "刷新页面点(p1)": 0,
+                "首行业务点(p2)": 1,
+                "立即接单点(p3)": 2,
+                "确认接单点(p4)": 3,
+                "返回首页点(p5)": 4,
             }
             idx = idx_map.get(label, 0)
             self._pt_x[idx].setValue(x)

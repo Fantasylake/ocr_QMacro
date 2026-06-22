@@ -29,7 +29,7 @@ class PointPanel(QWidget):
         box = QGroupBox("点击点")
         glay = QGridLayout(box)
 
-        labels = ["刷新点(p1)", "首行点(p2)", "页内点(p3)", "首页点(p4)"]
+        labels = ["刷新页面点(p1)", "首行业务点(p2)", "立即接单点(p3)", "确认接单点(p4)", "返回首页点(p5)"]
         self.x_spins: list[QSpinBox] = []
         self.y_spins: list[QSpinBox] = []
         self.pick_btns: list[QPushButton] = []
@@ -55,19 +55,19 @@ class PointPanel(QWidget):
         lay.addWidget(box)
 
     def fill_from_pick(self, idx: int, x: int, y: int) -> None:
-        if 0 <= idx < 4:
+        if 0 <= idx < 5:
             self.x_spins[idx].setValue(x)
             self.y_spins[idx].setValue(y)
 
     def collect(self) -> list[dict]:
-        labels = ["刷新点", "首行点", "页内点", "首页点"]
+        labels = ["刷新页面点", "首行业务点", "立即接单点", "确认接单点", "返回首页点"]
         return [
             {"name": labels[i], "x": self.x_spins[i].value(), "y": self.y_spins[i].value()}
-            for i in range(4)
+            for i in range(5)
         ]
 
     def apply(self, points: list[dict]) -> None:
         for i, p in enumerate(points):
-            if i < 4:
+            if i < 5:
                 self.x_spins[i].setValue(int(p.get("x", 0)))
                 self.y_spins[i].setValue(int(p.get("y", 0)))

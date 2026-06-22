@@ -13,7 +13,7 @@ from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal
 from core.capture import capture_region, CaptureError
 from core.clicker import click_point
 from core.config import ScanConfig, region_hash
-from core.matcher import match_keywords, normalize_text, texts_equal
+from core.matcher import match_keywords, normalize_text, texts_equal, contains_any_keyword
 from core.ocr import recognize_text
 from core.storage import append_jsonl_record, append_log_txt, save_screenshot
 
@@ -79,12 +79,12 @@ class ScanWorker(QObject):
             return self._establish_baseline(ts)
 
         # Step 1: click refresh point p1
-        self.log.emit(f"点击刷新点，等待{cfg.wait_interval}s...")
-        append_log_txt(f"点击刷新点，等待{cfg.wait_interval}s...")
+        self.log.emit(f"点击刷新页面点，等待{cfg.wait_interval}s...")
+        append_log_txt(f"点击刷新页面点，等待{cfg.wait_interval}s...")
         ok, err = click_point(cfg.refresh_point.x, cfg.refresh_point.y)
         if not ok:
-            self.log.emit(f"  刷新点点击失败: {err}")
-            append_log_txt(f"刷新点点击失败: {err}")
+            self.log.emit(f"  刷新页面点点击失败: {err}")
+            append_log_txt(f"刷新页面点点击失败: {err}")
 
         # Wait T2 for page to refresh
         self._wait(cfg.wait_interval)
@@ -161,6 +161,16 @@ class ScanWorker(QObject):
             append_log_txt("未命中关键词")
             return [ScanResult(ts, region.name, text, kw, img_path, False)]
 
+        # Gate 3: exclusion — if the user configured exclude_keywords and
+        # any of them appears in the OCR text, skip the click chain for
+        # this round. Empty ``exclude_keywords`` short-circuits the check,
+        # so this is a no-op for users who don't use the feature.
+        excluded, ekw = contains_any_keyword(text, cfg.exclude_keywords)
+        if excluded:
+            self.log.emit(f"命中排除关键词「{ekw}」: 跳过点击，等待下一轮")
+            append_log_txt(f"命中排除关键词「{ekw}」: 跳过点击，等待下一轮")
+            return [ScanResult(ts, region.name, text, kw, img_path, False)]
+
         # matched + new text → write record + click
         self.log.emit(f"命中「{kw}」: 文本已更新")
         append_log_txt(f"命中「{kw}」: 文本已更新")
@@ -179,30 +189,39 @@ class ScanWorker(QObject):
             append_log_txt("命中（未开启中间文件输出）")
 
         # Click first-line point p2
-        self.log.emit(f"点击首行点，等待{cfg.wait_interval}s...")
-        append_log_txt(f"点击首行点，等待{cfg.wait_interval}s...")
+        self.log.emit(f"点击首行业务点，等待{cfg.wait_interval}s...")
+        append_log_txt(f"点击首行业务点，等待{cfg.wait_interval}s...")
         ok, err = click_point(cfg.first_line_point.x, cfg.first_line_point.y)
         if not ok:
-            self.log.emit(f"  首行点点击失败: {err}")
-            append_log_txt(f"首行点点击失败: {err}")
+            self.log.emit(f"  首行业务点点击失败: {err}")
+            append_log_txt(f"首行业务点点击失败: {err}")
         self._wait(cfg.wait_interval)
 
-        # Click page-click point p3
-        self.log.emit(f"点击页内点，等待{cfg.wait_interval}s...")
-        append_log_txt(f"点击页内点，等待{cfg.wait_interval}s...")
+        # Click page-click point p3 (立即接单点)
+        self.log.emit(f"点击立即接单点，等待{cfg.wait_interval}s...")
+        append_log_txt(f"点击立即接单点，等待{cfg.wait_interval}s...")
         ok, err = click_point(cfg.page_click_point.x, cfg.page_click_point.y)
         if not ok:
-            self.log.emit(f"  页内点点击失败: {err}")
-            append_log_txt(f"页内点点击失败: {err}")
+            self.log.emit(f"  立即接单点点击失败: {err}")
+            append_log_txt(f"立即接单点点击失败: {err}")
         self._wait(cfg.wait_interval)
 
-        # Click home point p4
-        self.log.emit(f"点击首页点，等待{cfg.wait_interval}s...")
-        append_log_txt(f"点击首页点，等待{cfg.wait_interval}s...")
+        # Click page-click point p4 (确认接单点)
+        self.log.emit(f"点击确认接单点，等待{cfg.wait_interval}s...")
+        append_log_txt(f"点击确认接单点，等待{cfg.wait_interval}s...")
+        ok, err = click_point(cfg.page_click_point_2.x, cfg.page_click_point_2.y)
+        if not ok:
+            self.log.emit(f"  确认接单点点击失败: {err}")
+            append_log_txt(f"确认接单点点击失败: {err}")
+        self._wait(cfg.wait_interval)
+
+        # Click home point p5
+        self.log.emit(f"点击返回首页点，等待{cfg.wait_interval}s...")
+        append_log_txt(f"点击返回首页点，等待{cfg.wait_interval}s...")
         ok, err = click_point(cfg.home_point.x, cfg.home_point.y)
         if not ok:
-            self.log.emit(f"  首页点点击失败: {err}")
-            append_log_txt(f"首页点点击失败: {err}")
+            self.log.emit(f"  返回首页点点击失败: {err}")
+            append_log_txt(f"返回首页点点击失败: {err}")
         self._wait(cfg.wait_interval)
 
         return [ScanResult(ts, region.name, text, kw, img_path, True)]

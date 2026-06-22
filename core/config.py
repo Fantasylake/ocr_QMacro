@@ -10,11 +10,17 @@ from typing import List
 DEFAULT_CONFIG = {
     "scan_interval": 5,
     "wait_interval": 3,
-    "keywords": [],
-    "refresh_point": {"name": "刷新点", "x": 0, "y": 0},
-    "first_line_point": {"name": "首行点", "x": 0, "y": 0},
-    "page_click_point": {"name": "页内点", "x": 0, "y": 0},
-    "home_point": {"name": "首页点", "x": 0, "y": 0},
+    "keywords": [
+        "通风天窗", "通风气楼", "薄型天窗", "电动消防联动排烟天窗",
+        "流线型通风器", "三角型排烟天窗", "通风天窗厂家",
+        "通风气楼厂家", "电动排烟天窗厂家",
+    ],
+    "exclude_keywords": ["自己的厂房"],
+    "refresh_point": {"name": "刷新页面点", "x": 0, "y": 0},
+    "first_line_point": {"name": "首行业务点", "x": 0, "y": 0},
+    "page_click_point": {"name": "立即接单点", "x": 0, "y": 0},
+    "page_click_point_2": {"name": "确认接单点", "x": 0, "y": 0},
+    "home_point": {"name": "返回首页点", "x": 0, "y": 0},
     "monitor_region": {"name": "a1", "top": 0, "left": 0, "width": 0, "height": 0},
     "output_json": False,
     "use_baseline": False,
@@ -74,10 +80,12 @@ class ScanConfig:
     scan_interval: int = 5
     wait_interval: int = 3
     keywords: List[str] = field(default_factory=list)
-    refresh_point: ClickPoint = field(default_factory=lambda: ClickPoint("刷新点", 0, 0))
-    first_line_point: ClickPoint = field(default_factory=lambda: ClickPoint("首行点", 0, 0))
-    page_click_point: ClickPoint = field(default_factory=lambda: ClickPoint("页内点", 0, 0))
-    home_point: ClickPoint = field(default_factory=lambda: ClickPoint("首页点", 0, 0))
+    exclude_keywords: List[str] = field(default_factory=list)
+    refresh_point: ClickPoint = field(default_factory=lambda: ClickPoint("刷新页面点", 0, 0))
+    first_line_point: ClickPoint = field(default_factory=lambda: ClickPoint("首行业务点", 0, 0))
+    page_click_point: ClickPoint = field(default_factory=lambda: ClickPoint("立即接单点", 0, 0))
+    page_click_point_2: ClickPoint = field(default_factory=lambda: ClickPoint("确认接单点", 0, 0))
+    home_point: ClickPoint = field(default_factory=lambda: ClickPoint("返回首页点", 0, 0))
     monitor_region: MonitorRegion = field(default_factory=lambda: MonitorRegion("a1", 0, 0, 0, 0))
     output_json: bool = False
     use_baseline: bool = False
@@ -91,9 +99,11 @@ class ScanConfig:
             scan_interval=DEFAULT_CONFIG["scan_interval"],
             wait_interval=DEFAULT_CONFIG["wait_interval"],
             keywords=list(DEFAULT_CONFIG["keywords"]),
+            exclude_keywords=list(DEFAULT_CONFIG["exclude_keywords"]),
             refresh_point=ClickPoint.from_dict(DEFAULT_CONFIG["refresh_point"]),
             first_line_point=ClickPoint.from_dict(DEFAULT_CONFIG["first_line_point"]),
             page_click_point=ClickPoint.from_dict(DEFAULT_CONFIG["page_click_point"]),
+            page_click_point_2=ClickPoint.from_dict(DEFAULT_CONFIG["page_click_point_2"]),
             home_point=ClickPoint.from_dict(DEFAULT_CONFIG["home_point"]),
             monitor_region=MonitorRegion.from_dict(DEFAULT_CONFIG["monitor_region"]),
             output_json=bool(DEFAULT_CONFIG["output_json"]),
@@ -123,9 +133,11 @@ def load_config(path: Path) -> ScanConfig:
         scan_interval=int(raw.get("scan_interval", DEFAULT_CONFIG["scan_interval"])),
         wait_interval=int(raw.get("wait_interval", DEFAULT_CONFIG["wait_interval"])),
         keywords=[str(k) for k in raw.get("keywords", [])],
+        exclude_keywords=[str(k) for k in raw.get("exclude_keywords", [])],
         refresh_point=ClickPoint.from_dict(raw.get("refresh_point", DEFAULT_CONFIG["refresh_point"])),
         first_line_point=ClickPoint.from_dict(raw.get("first_line_point", DEFAULT_CONFIG["first_line_point"])),
         page_click_point=ClickPoint.from_dict(raw.get("page_click_point", DEFAULT_CONFIG["page_click_point"])),
+        page_click_point_2=ClickPoint.from_dict(raw.get("page_click_point_2", DEFAULT_CONFIG["page_click_point_2"])),
         home_point=ClickPoint.from_dict(raw.get("home_point", DEFAULT_CONFIG["home_point"])),
         monitor_region=MonitorRegion.from_dict(raw.get("monitor_region", DEFAULT_CONFIG["monitor_region"])),
         output_json=bool(raw.get("output_json", DEFAULT_CONFIG["output_json"])),
@@ -142,9 +154,11 @@ def save_config(cfg: ScanConfig, path: Path) -> None:
         "scan_interval": cfg.scan_interval,
         "wait_interval": cfg.wait_interval,
         "keywords": cfg.keywords,
+        "exclude_keywords": cfg.exclude_keywords,
         "refresh_point": cfg.refresh_point.to_dict(),
         "first_line_point": cfg.first_line_point.to_dict(),
         "page_click_point": cfg.page_click_point.to_dict(),
+        "page_click_point_2": cfg.page_click_point_2.to_dict(),
         "home_point": cfg.home_point.to_dict(),
         "monitor_region": cfg.monitor_region.to_dict(),
         "output_json": cfg.output_json,
