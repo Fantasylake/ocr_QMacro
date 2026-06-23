@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import ScanConfig, load_config, save_config
+from core.paths import config_path
 from core.scheduler import Scheduler
 from core.storage import clean_old_logs
 from ui.config_dialog import ConfigDialog
@@ -30,7 +31,10 @@ from ui.picker import pick_coordinate, pick_region
 from ui.point_panel import PointPanel
 from ui.region_panel import RegionPanel
 
-CONFIG_PATH = Path("config.json")
+# Resolved at import time. In dev this lives next to the source code; in a
+# frozen build it lives under %APPDATA%\QMacro\config.json. Tests replace
+# this with monkeypatch.setattr(mw, "CONFIG_PATH", tmp_path / "config.json").
+CONFIG_PATH = config_path()
 SAVE_DEBOUNCE_MS = 600
 
 

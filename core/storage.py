@@ -9,14 +9,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Union
 
+from core.paths import app_data_dir
+
 DAY_FOLDER_RE = re.compile(r"^\d{8}$")
 
 ILLEGAL = re.compile(r'[\\/:\*\?"<>\|\x00-\x1f]')
 
 LOG_RETENTION_DAYS = 7
-LOG_DIR = Path("src/log")
-OUTPUT_DIR = Path("src/output")
-PIC_DIR = Path("src/pic")
+# Resolved at import time. In dev this is the repo root (e.g. <repo>/log);
+# in a frozen build it is %APPDATA%\QMacro\log. Tests that need isolation
+# pass an explicit `root=` kwarg, so the default values are not touched.
+_DATA = app_data_dir()
+LOG_DIR = _DATA / "log"
+OUTPUT_DIR = _DATA / "output"
+PIC_DIR = _DATA / "pic"
 
 # When a YYYYMMDD picture folder has more than this many PNGs, oldest
 # files are removed so the folder stays bounded. Set to 0 to disable.
