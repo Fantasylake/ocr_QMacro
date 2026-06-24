@@ -1,0 +1,57 @@
+{
+  "scan_interval": 5,
+  "wait_interval": 3,
+  "keywords": [
+    "通风天窗",
+    "通风气楼",
+    "薄型天窗",
+    "电动消防联动排烟天窗",
+    "流线型通风器",
+    "三角型排烟天窗",
+    "通风天窗厂家",
+    "通风气楼厂家",
+    "电动排烟天窗厂家"
+  ],
+  "exclude_keywords": [
+    "自己的厂房"
+  ],
+  "refresh_point": {
+    "name": "刷新页面点",
+    "x": 0,
+    "y": 0
+  },
+  "first_line_point": {
+    "name": "首行业务点",
+    "x": 0,
+    "y": 0
+  },
+  "page_click_point": {
+    "name": "立即接单点",
+    "x": 0,
+    "y": 0
+  },
+  "page_click_point_2": {
+    "name": "确认接单点",
+    "x": 0,
+    "y": 0
+  },
+  "home_point": {
+    "name": "返回首页点",
+    "x": 0,
+    "y": 0
+  },
+  "monitor_region": {
+    "name": "a1",
+    "bbox": {
+      "top": 0,
+      "left": 0,
+      "width": 0,
+      "height": 0
+    }
+  },
+  "output_json": false,
+  "use_baseline": false,
+  "baseline_text": "",
+  "baseline_region_hash": "",
+  "baseline_timestamp": ""
+}

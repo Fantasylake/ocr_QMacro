@@ -14,24 +14,22 @@ plus the bundled config.json for first-run fallback.
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 block_cipher = None
 PROJECT_ROOT = Path(SPECPATH).resolve()
 
-# Bundle RapidOCR's onnx model files. The package declares them as
-# package_data, so collect_data_files picks them up regardless of where
-# the Python install lives (venv, system Python, Conda, etc.).
 rapidocr_data = collect_data_files("rapidocr_onnxruntime")
+onnx_binaries = collect_dynamic_libs("onnxruntime")
 
 a = Analysis(
     [str(PROJECT_ROOT / "main.py")],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[],
+    binaries=[*onnx_binaries],
     datas=[
-        # Default config.json -- first-run fallback so the user starts with
-        # sane defaults even if %APPDATA%\QMacro\config.json doesn't exist yet.
-        (str(PROJECT_ROOT / "config.json"), "."),
+        # Screen-neutral defaults (all coordinates zero). Never bundle the
+        # developer's local config.json — it contains machine-specific pixels.
+        (str(PROJECT_ROOT / "config.template.json"), "."),
         *rapidocr_data,
     ],
     hiddenimports=[
@@ -43,6 +41,8 @@ a = Analysis(
         "rapidocr_onnxruntime.ch_ppocr_v2_cls",
         "rapidocr_onnxruntime.ch_ppocr_v2_cls.text_cls",
         "rapidocr_onnxruntime.rapid_ocr_api",
+        "onnxruntime",
+        "onnxruntime.capi.onnxruntime_pybind11_state",
         "mss",
         "pynput.keyboard._win32",
         "pynput.mouse._win32",
@@ -112,6 +112,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest=str(PROJECT_ROOT / "tools" / "app.manifest"),
     # icon=str(PROJECT_ROOT / "assets" / "qmacro.ico"),  # add when icon exists
     # version=str(PROJECT_ROOT / "version_info.txt"),     # add to lower AV false-positive
 )

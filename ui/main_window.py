@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.capture import bbox_within_desktop, point_within_desktop
 from core.config import ScanConfig, load_config, save_config
 from core.paths import config_path
 from core.scheduler import Scheduler
@@ -288,6 +289,16 @@ class MainWindow(QMainWindow):
         if reg["width"] < 10 or reg["height"] < 10:
             QMessageBox.warning(self, "区域无效", "监控区域宽高至少需要 10px，请先框选有效区域")
             return False
+        ok, msg = bbox_within_desktop(reg)
+        if not ok:
+            QMessageBox.warning(self, "区域超出屏幕", msg)
+            return False
+        pt_names = ["刷新页面点", "首行业务点", "立即接单点", "确认接单点", "返回首页点"]
+        for i, x in enumerate(self._pt_x):
+            ok, msg = point_within_desktop(x.value(), self._pt_y[i].value())
+            if not ok:
+                QMessageBox.warning(self, "坐标超出屏幕", f"{pt_names[i]}: {msg}")
+                return False
         return True
 
     # ------------------------------------------------------------------ Start/Stop

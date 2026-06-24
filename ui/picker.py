@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from PySide6.QtCore import Qt, QRect, QPoint
-from PySide6.QtGui import QKeyEvent, QMouseEvent, QPainter, QColor, QPen, QFont, QRegion, QBitmap
+from PySide6.QtGui import QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QColor, QPen, QFont, QRegion
 from PySide6.QtWidgets import QApplication, QWidget
+
+from core.coords import clear_coord_cache, global_logical_to_physical
 
 
 @dataclass
@@ -25,6 +27,17 @@ def _norm_rect(x0: int, y0: int, x1: int, y1: int) -> PickedRegion:
     return PickedRegion(top=top, left=left, width=width, height=height)
 
 
+def _virtual_desktop_geometry() -> QRect:
+    """Union of all connected screens (supports multi-monitor picking)."""
+    screens = QGuiApplication.screens()
+    if not screens:
+        return QRect(0, 0, 1920, 1080)
+    geo = screens[0].geometry()
+    for screen in screens[1:]:
+        geo = geo.united(screen.geometry())
+    return geo
+
+
 class PickerOverlay(QWidget):
     HINT_BAR_HEIGHT = 56
 
@@ -35,8 +48,9 @@ class PickerOverlay(QWidget):
         ----------
         dpr : float, optional
             Device pixel ratio to convert logical mouse positions to
-            physical screen pixels. If None, queries primaryScreen() at
-            click time. Inject explicitly in tests to avoid Qt screen deps.
+            physical screen pixels. If None, uses the screen under the
+            cursor (required for mixed-DPI multi-monitor setups). Inject
+            explicitly in tests to avoid Qt screen deps.
         """
         super().__init__()
         self.setWindowFlags(
@@ -44,23 +58,14 @@ class PickerOverlay(QWidget):
             | Qt.WindowStaysOnTopHint
             | Qt.Tool
         )
-        # True per-pixel transparency on Windows requires:
-        # - WA_TranslucentBackground: allows the framebuffer to have alpha < 255
-        # - WA_NoSystemBackground:   don't let Qt fill with the system bg color
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setMouseTracking(True)
         self.setCursor(Qt.CrossCursor)
         self._dpr_override = dpr
-        screen = QApplication.primaryScreen().geometry()
-        self.setGeometry(screen)
+        clear_coord_cache()
+        self.setGeometry(_virtual_desktop_geometry())
 
-        # WA_TranslucentBackground makes transparent pixels NON-hit-testable.
-        # We want the whole screen to be hit-testable while visually transparent.
-        # Solution: use setMask(QRegion) to mark the FULL widget rect as
-        # hit-testable. Unlike QBitmap (which can be interpreted as alpha
-        # and silently dropped on translucent widgets), QRegion defines
-        # geometry directly and works reliably on Windows.
         from PySide6.QtGui import QRegion as QGuiRegion
         self.setMask(QGuiRegion(self.rect()))
 
@@ -68,35 +73,21 @@ class PickerOverlay(QWidget):
         self._mode: str = "point"
         self._press_pos: Optional[Tuple[int, int]] = None
         self._current_pos: Optional[Tuple[int, int]] = None
+        self._press_local: Optional[Tuple[int, int]] = None
+        self._current_local: Optional[Tuple[int, int]] = None
         self._region_result: Optional[PickedRegion] = None
-
-    def _device_pixel_ratio(self) -> float:
-        if self._dpr_override is not None:
-            return self._dpr_override
-        screen = QApplication.primaryScreen()
-        return screen.devicePixelRatio() if screen else 1.0
 
     def set_mode(self, mode: str) -> None:
         assert mode in ("point", "region")
         self._mode = mode
 
     def showEvent(self, event):
-        """When the overlay becomes visible, grab all mouse + keyboard input.
-
-        This is the only reliable way to receive mouse events across the
-        entire screen on Windows when using WA_TranslucentBackground, because
-        the Windows window manager cannot see Qt's internal alpha mask and
-        will route mouse events to the underlying app for any pixel that
-        Qt has painted as fully transparent. grabMouse() forces the WM
-        to send every mouse event to this widget regardless of position.
-        """
         super().showEvent(event)
         self.grabMouse()
         self.grabKeyboard()
         self.setFocus(Qt.OtherFocusReason)
 
     def hideEvent(self, event):
-        """Release the global mouse/keyboard grab when closing."""
         try:
             self.releaseMouse()
             self.releaseKeyboard()
@@ -115,21 +106,8 @@ class PickerOverlay(QWidget):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-
-        # 0) Sub-perceptual overlay covering the WHOLE screen.
-        # Windows WM (winuser.h) routes mouse events based on the *system-level*
-        # window bitmap. With WS_EX_LAYERED (which WA_TranslucentBackground
-        # requires on Windows), the WM treats alpha=0 pixels as "see-through"
-        # and forwards mouse events to the underlying app -- Qt's setMask()
-        # and grabMouse() cannot override this, they only act at the Qt
-        # level once the event has reached us.
-        #
-        # Solution: paint a 1/255-alpha fill over the entire widget. This is
-        # completely invisible to the human eye (1/255 ~ 0.4%) but it makes
-        # the WM treat the pixel as "opaque" and route events to OUR window.
         painter.fillRect(self.rect(), QColor(0, 0, 0, 1))
 
-        # 1) Translucent hint bar at the top -- the only opaque-ish UI element
         hint_rect = self._hint_rect()
         painter.fillRect(hint_rect, QColor(0, 0, 0, 160))
         painter.setPen(QPen(QColor(255, 215, 0), 1))
@@ -142,14 +120,13 @@ class PickerOverlay(QWidget):
         painter.setPen(QColor(255, 255, 255))
         painter.drawText(hint_rect, Qt.AlignCenter, self._hint_text())
 
-        # 2) Region-mode selection rectangle (transparent everywhere else)
-        # _press_pos / _current_pos are stored in PHYSICAL pixels (for mss).
-        # QPainter draws in WIDGET-LOCAL LOGICAL pixels (DIPs), so we must
-        # convert back before drawing -- otherwise the visible green box
-        # is offset from the cursor by the devicePixelRatio factor.
-        if self._mode == "region" and self._press_pos is not None and self._current_pos is not None:
-            lx, ly = self._physical_to_widget(self._press_pos[0], self._press_pos[1])
-            cx, cy = self._physical_to_widget(self._current_pos[0], self._current_pos[1])
+        if (
+            self._mode == "region"
+            and self._press_local is not None
+            and self._current_local is not None
+        ):
+            lx, ly = self._press_local
+            cx, cy = self._current_local
             rect = QRect(
                 min(lx, cx),
                 min(ly, cy),
@@ -184,11 +161,14 @@ class PickerOverlay(QWidget):
         else:
             self._press_pos = self._to_physical(event.globalPosition())
             self._current_pos = self._press_pos
+            self._press_local = self._local_pos(event)
+            self._current_local = self._press_local
             self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._mode == "region" and self._press_pos is not None:
             self._current_pos = self._to_physical(event.globalPosition())
+            self._current_local = self._local_pos(event)
             self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -202,31 +182,17 @@ class PickerOverlay(QWidget):
             self._region_result = region
         self.close()
 
+    def _local_pos(self, event: QMouseEvent) -> Tuple[int, int]:
+        pos = event.position()
+        return int(pos.x()), int(pos.y())
+
     def _to_physical(self, gp) -> Tuple[int, int]:
-        """Convert a global logical position (DIP) to physical screen pixels.
-
-        On Windows with HiDPI scaling, Qt reports mouse positions in logical
-        pixels (DIPs) while mss captures in physical pixels. The OS mouse
-        cursor and the framebuffer are 1:1 in physical space, so we scale
-        the pick coordinates by the devicePixelRatio before storing them.
-        Storing physical pixels means the region/point maps directly to
-        the mss coordinate system with no further conversion needed.
-        """
-        dpr = self._device_pixel_ratio()
-        return (int(gp.x() * dpr), int(gp.y() * dpr))
-
-    def _physical_to_widget(self, x: int, y: int) -> Tuple[int, int]:
-        """Convert a physical pixel position to widget-local logical pixels.
-
-        Mouse event positions are stored in physical pixels (matching the
-        mss framebuffer). But QPainter in paintEvent uses the widget's own
-        coordinate system, which is logical pixels (DIPs) for widgets
-        with WA_TranslucentBackground. Without this conversion, the green
-        selection rectangle gets drawn ~DPR times farther from the cursor
-        than where the user actually clicked.
-        """
-        dpr = self._device_pixel_ratio()
-        return (int(x / dpr), int(y / dpr))
+        """Convert Qt global logical position to mss physical pixels."""
+        return global_logical_to_physical(
+            gp.x(),
+            gp.y(),
+            dpr_override=self._dpr_override,
+        )
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.key() == Qt.Key_Escape:

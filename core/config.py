@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+
+from core.paths import is_frozen
 
 DEFAULT_CONFIG = {
     "scan_interval": 5,
@@ -114,9 +117,34 @@ class ScanConfig:
         )
 
 
+def _bundled_template_path() -> Optional[Path]:
+    """Path to the read-only template shipped inside a frozen build."""
+    if not is_frozen():
+        return None
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass is None:
+        return None
+    template = Path(meipass) / "config.template.json"
+    return template if template.exists() else None
+
+
+def _seed_config_from_template(path: Path) -> bool:
+    """Copy the bundled template to ``path`` on first run. Returns success."""
+    template = _bundled_template_path()
+    if template is None:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(template, path)
+        return True
+    except OSError:
+        return False
+
+
 def load_config(path: Path) -> ScanConfig:
     if not path.exists():
-        return ScanConfig.default()
+        if not _seed_config_from_template(path):
+            return ScanConfig.default()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):

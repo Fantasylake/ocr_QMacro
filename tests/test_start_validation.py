@@ -70,13 +70,37 @@ def test_validation_rejects_zero_region(window, monkeypatch):
                        lambda parent, title, text, *a, **kw: (warned.append(text) or 0))
 
     window.kw_edit.setText("成功")
-    for i in range(4):
+    for i in range(5):
         window._pt_x[i].setValue(100 + i)
         window._pt_y[i].setValue(200 + i)
     window.region_panel.fill_from_pick(0, 0, 0, 0)
 
     window._on_start()
     assert any("区域" in w for w in warned), f"No region warning found in {warned}"
+
+
+def test_validation_rejects_region_outside_desktop(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    warned = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda parent, title, text, *a, **kw: (warned.append(text) or 0),
+    )
+    monkeypatch.setattr(
+        "ui.main_window.bbox_within_desktop",
+        lambda bbox: (False, "监控区域超出当前屏幕范围"),
+    )
+
+    window.kw_edit.setText("成功")
+    for i in range(5):
+        window._pt_x[i].setValue(100 + i)
+        window._pt_y[i].setValue(200 + i)
+    window.region_panel.fill_from_pick(10, 20, 300, 200)
+
+    window._on_start()
+    assert any("超出当前屏幕" in w for w in warned)
 
 
 def test_validation_accepts_valid_setup(window, monkeypatch):
@@ -88,7 +112,7 @@ def test_validation_accepts_valid_setup(window, monkeypatch):
     window.scheduler.update_config = lambda cfg: None
 
     window.kw_edit.setText("成功")
-    for i in range(4):
+    for i in range(5):
         window._pt_x[i].setValue(100 + i * 10)
         window._pt_y[i].setValue(200 + i * 10)
     window.region_panel.fill_from_pick(10, 20, 300, 200)

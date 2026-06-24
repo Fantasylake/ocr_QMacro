@@ -10,7 +10,7 @@ from typing import List, Optional
 
 from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal
 
-from core.capture import capture_region, CaptureError
+from core.capture import capture_region, CaptureError, png_mean_luminance
 from core.clicker import click_point
 from core.config import ScanConfig, region_hash
 from core.matcher import match_keywords, normalize_text, texts_equal, contains_any_keyword
@@ -120,8 +120,7 @@ class ScanWorker(QObject):
 
         matched, kw = match_keywords(text, cfg.keywords)
 
-        self.log.emit(f"OCR: {text[:80] or '(空)'}")
-        append_log_txt(f"OCR: {text[:80] or '(空)'}")
+        self._log_ocr_result(text, png, region.bbox)
 
         # Step 2.5: region changed since baseline was set → auto-reset.
         if cfg.use_baseline and cfg.baseline_region_hash and region_hash(region) != cfg.baseline_region_hash:
@@ -265,6 +264,19 @@ class ScanWorker(QObject):
         if self._stop_event.is_set():
             loop.quit()
 
+    def _log_ocr_result(self, text: str, png: bytes, bbox: dict, prefix: str = "OCR") -> None:
+        preview = text[:80] or "(空)"
+        self.log.emit(f"{prefix}: {preview}")
+        append_log_txt(f"{prefix}: {preview}")
+        if not text.strip():
+            lum = png_mean_luminance(png)
+            hint = (
+                f"[OCR为空] 区域={bbox} PNG={len(png)}B 平均亮度={lum:.0f}。"
+                "请在本机重新「框选区域」；若亮度接近0说明截到了空白/黑屏"
+            )
+            self.log.emit(hint)
+            append_log_txt(hint)
+
     def _establish_baseline(self, ts: datetime) -> List[ScanResult]:
         """One-shot: capture + OCR the current page and store as baseline.
 
@@ -312,6 +324,7 @@ class ScanWorker(QObject):
         cfg.baseline_timestamp = ts_iso
 
         snippet = (normalized[:80] + "...") if len(normalized) > 80 else normalized
+        self._log_ocr_result(normalized, png, region.bbox, prefix="[基准确立]")
         self.log.emit(f"[基准确立完成] 长度={len(normalized)} 预览: {snippet or '(空)'}")
         append_log_txt(f"基准确立完成: 长度={len(normalized)} 预览: {snippet or '(空)'}")
         self.baseline_updated.emit(True, normalized, rhash, ts_iso)
